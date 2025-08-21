@@ -16,7 +16,8 @@ api.interceptors.request.use(async (config) => {
 });
 
 export async function login(email, password) {
-  const { data } = await api.post('/auth/login', { email, password });
+  const normalizedEmail = (email || '').trim().toLowerCase();
+  const { data } = await api.post('/auth/login', { email: normalizedEmail, password });
   await AsyncStorage.setItem('token', data.token);
   return data;
 }

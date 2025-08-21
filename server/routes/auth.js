@@ -3,11 +3,18 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const router = express.Router();
 
+// Escape regex special characters for safe usage
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 router.post('/register', async (req, res) => {
   try {
     const { username, email, password } = req.body;
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    const normalizedUsername = (username || '').trim();
 
-    if (!username || !email || !password) {
+    if (!normalizedUsername || !normalizedEmail || !password) {
       return res.status(400).json({ message: 'Username, email and password are required' });
     }
 
@@ -15,12 +22,12 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
     }
 
-    const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+    const existingUser = await User.findOne({ $or: [{ username: normalizedUsername }, { email: normalizedEmail }] });
     if (existingUser) {
       return res.status(400).json({ message: 'Username or email already exists' });
     }
 
-    const user = new User({ username, email, password });
+    const user = new User({ username: normalizedUsername, email: normalizedEmail, password });
     await user.save();
 
     const token = jwt.sign(
@@ -47,12 +54,23 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    // Mobile sends this field as 'email'; treat it as either email or username
+    const rawIdentifier = (email || '').trim();
+    const normalizedEmail = rawIdentifier.toLowerCase();
+    const normalizedUsername = rawIdentifier; // usernames can be case-sensitive by choice; we stored trimmed
 
-    if (!email || !password) {
+    if (!rawIdentifier || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const user = await User.findOne({ email });
+    // Try finding by email (lowercased) or by username (case-insensitive)
+    const usernameRegex = new RegExp(`^${escapeRegex(normalizedUsername)}$`, 'i');
+    const user = await User.findOne({
+      $or: [
+        { email: normalizedEmail },
+        { username: usernameRegex }
+      ]
+    });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }

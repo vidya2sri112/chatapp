@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Button, FlatList, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { fetchMessages, markRead } from '../services/api';
-import { getSocket } from '../services/socket';
+import { getSocket, getCurrentUserId } from '../services/socket';
 import { colors, spacing, typography, radius } from '../theme/theme';
 
 export default function ChatScreen({ route }) {
@@ -18,28 +18,94 @@ export default function ChatScreen({ route }) {
       const socket = getSocket();
       if (!socket) return;
 
-      socket.on('message:new', (data) => {
-        if (data.sender._id === user.id) {
+      const onNewMessage = (data) => {
+        // Append any message that is part of this 1:1 conversation
+        if (data?.sender?._id === user.id || data?.receiver?._id === user.id) {
           setMessages((prev) => [...prev, data]);
-          if (data.id) {
-            socket.emit('message:read', { messageId: data.id, senderId: data.sender._id });
+          const mid = data?._id || data?.id;
+          if (mid) {
+            socket.emit('message:read', { messageId: mid, senderId: data.sender._id });
           }
         }
-      });
+      };
+      socket.on('message:new', onNewMessage);
 
-      socket.on('typing:start', (data) => {
+      const onMessageSent = (data) => {
+        // Replace the last optimistic message matching by text and status 'sending'
+        setMessages((prev) => {
+          const copy = [...prev];
+          for (let i = copy.length - 1; i >= 0; i--) {
+            const m = copy[i];
+            if (m.status === 'sending' && m.text === data.text) {
+              copy[i] = {
+                _id: data.id,
+                text: data.text,
+                timestamp: data.timestamp,
+                status: data.status,
+                sender: data.sender,
+                receiver: data.receiver,
+              };
+              return copy;
+            }
+          }
+          // If not found, append as a fallback
+          return [...copy, {
+            _id: data.id,
+            text: data.text,
+            timestamp: data.timestamp,
+            status: data.status,
+            sender: data.sender,
+            receiver: data.receiver,
+          }];
+        });
+      };
+      socket.on('message:sent', onMessageSent);
+
+      const onMessageRead = ({ messageId }) => {
+        setMessages((prev) => prev.map(m => {
+          const mid = m._id || m.id;
+          if (mid === messageId) return { ...m, status: 'read' };
+          return m;
+        }));
+      };
+      socket.on('message:read', onMessageRead);
+
+      const onTypingStart = (data) => {
         if (data.userId === user.id) setTyping(true);
-      });
+      };
+      socket.on('typing:start', onTypingStart);
 
-      socket.on('typing:stop', (data) => {
+      const onTypingStop = (data) => {
         if (data.userId === user.id) setTyping(false);
-      });
+      };
+      socket.on('typing:stop', onTypingStop);
+
+      // Cleanup listeners on unmount or when user changes
+      return () => {
+        socket.off('message:new', onNewMessage);
+        socket.off('typing:start', onTypingStart);
+        socket.off('typing:stop', onTypingStop);
+        socket.off('message:sent', onMessageSent);
+        socket.off('message:read', onMessageRead);
+      };
     })();
   }, [user.id]);
 
   const onSend = () => {
     const socket = getSocket();
     if (!text.trim() || !socket) return;
+    // Optimistically append the message so it appears immediately
+    const optimistic = {
+      _id: `tmp-${Date.now()}`,
+      text: text,
+      timestamp: Date.now(),
+      status: 'sending',
+      sender: { _id: getCurrentUserId() },
+      receiver: { _id: user.id },
+    };
+    setMessages((prev) => [...prev, optimistic]);
+
+    // Send to server
     socket.emit('message:send', { receiverId: user.id, text });
     setText('');
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
@@ -55,7 +121,9 @@ export default function ChatScreen({ route }) {
   };
 
   const renderItem = ({ item }) => {
-    const isOwn = item?.sender?._id && (item.sender._id !== user.id);
+    const myId = getCurrentUserId();
+    const senderId = item?.sender?._id;
+    const isOwn = !!myId && senderId === myId;
     const statusTick = isOwn ? (item.status === 'read' ? '✓✓' : item.status === 'delivered' ? '✓✓' : '✓') : '';
     return (
       <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start' }]}>

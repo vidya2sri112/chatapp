@@ -14,7 +14,8 @@ export default function LoginScreen({ navigation }) {
       await initSocket();
       navigation.replace('Home');
     } catch (e) {
-      Alert.alert('Login failed', 'Check your credentials');
+      const serverMsg = e?.response?.data?.message || e?.message || 'Check your credentials';
+      Alert.alert('Login failed', serverMsg);
     }
   };
 
