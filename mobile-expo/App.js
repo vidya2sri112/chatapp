@@ -1,33 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import Navigation from './src/navigation';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { verifyToken } from './src/services/api';
-import { initSocket, disconnectSocket } from './src/services/socket';
+import { disconnectSocket } from './src/services/socket';
 import { View, ActivityIndicator } from 'react-native';
 
 export default function App() {
-  const [initialRoute, setInitialRoute] = useState('Login');
-  const [loading, setLoading] = useState(true);
+  // Always start from Login; navigation will move to Home after successful login
+  const [initialRoute] = useState('Login');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const token = await AsyncStorage.getItem('token');
-        if (token) {
-          const ok = await verifyToken();
-          if (ok) {
-            setInitialRoute('Home');
-            initSocket();
-          } else {
-            await AsyncStorage.removeItem('token');
-          }
-        }
-      } finally {
-        setLoading(false);
-      }
-    })();
-
+    // Ensure sockets disconnect when app unmounts
     return () => disconnectSocket();
   }, []);
 
